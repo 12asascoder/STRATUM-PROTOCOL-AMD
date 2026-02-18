@@ -1,0 +1,51 @@
+# Grafana Datasources Configuration
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      httpMethod: POST
+
+  - name: Elasticsearch
+    type: elasticsearch
+    access: proxy
+    url: http://elasticsearch:9200
+    database: "stratum-*"
+    jsonData:
+      esVersion: "8.11.0"
+      timeField: "@timestamp"
+      logMessageField: "message"
+      logLevelField: "level"
+    editable: true
+
+  - name: PostgreSQL
+    type: postgres
+    url: postgres:5432
+    database: stratum_protocol
+    user: stratum_admin
+    secureJsonData:
+      password: dev_password
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 5
+    editable: true
+
+  - name: TimescaleDB
+    type: postgres
+    url: timescaledb:5432
+    database: stratum_timeseries
+    user: timescale_admin
+    secureJsonData:
+      password: dev_password
+    jsonData:
+      sslmode: disable
+      timescaledb: true
+    editable: true

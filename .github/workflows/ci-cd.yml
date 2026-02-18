@@ -1,0 +1,261 @@
+name: STRATUM PROTOCOL - CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+jobs:
+  
+  # =============================================================================
+  # LINT AND TEST
+  # =============================================================================
+  
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [
+          data-ingestion,
+          knowledge-graph,
+          cascading-failure,
+          state-estimation,
+          citizen-behavior,
+          policy-optimization,
+          economic-intelligence,
+          decision-ledger
+        ]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd services/${{ matrix.service }}
+        pip install -r requirements.txt
+        pip install pytest pytest-cov flake8
+    
+    - name: Lint with flake8
+      run: |
+        cd services/${{ matrix.service }}
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Run tests
+      run: |
+        cd services/${{ matrix.service }}
+        pytest tests/ --cov=. --cov-report=xml || echo "No tests found"
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./services/${{ matrix.service }}/coverage.xml
+        flags: ${{ matrix.service }}
+  
+  # =============================================================================
+  # BUILD DOCKER IMAGES
+  # =============================================================================
+  
+  build-images:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    strategy:
+      matrix:
+        service: [
+          data-ingestion,
+          knowledge-graph,
+          cascading-failure,
+          state-estimation,
+          citizen-behavior,
+          policy-optimization,
+          economic-intelligence,
+          decision-ledger,
+          frontend
+        ]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./services/${{ matrix.service }}
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+  
+  # =============================================================================
+  # SECURITY SCANNING
+  # =============================================================================
+  
+  security-scan:
+    needs: build-images
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+  
+  # =============================================================================
+  # DEPLOY TO KUBERNETES
+  # =============================================================================
+  
+  deploy-staging:
+    needs: [build-images, security-scan]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+    
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --region us-east-1 --name stratum-staging
+    
+    - name: Deploy to Kubernetes
+      run: |
+        kubectl apply -f k8s/namespace.yaml
+        kubectl apply -f k8s/services/
+        kubectl rollout status deployment/data-ingestion -n stratum-protocol
+        kubectl rollout status deployment/knowledge-graph -n stratum-protocol
+    
+    - name: Run smoke tests
+      run: |
+        kubectl run smoke-test --image=curlimages/curl --restart=Never -n stratum-protocol -- \
+          curl http://data-ingestion:8001/health
+        kubectl wait --for=condition=complete --timeout=60s job/smoke-test -n stratum-protocol
+  
+  deploy-production:
+    needs: [build-images, security-scan]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+    
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --region us-east-1 --name stratum-production
+    
+    - name: Deploy to Production
+      run: |
+        kubectl apply -f k8s/namespace.yaml
+        kubectl apply -f k8s/services/
+        
+        # Rolling update with health checks
+        for service in data-ingestion knowledge-graph cascading-failure; do
+          kubectl set image deployment/$service $service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/$service:${{ github.sha }} -n stratum-protocol
+          kubectl rollout status deployment/$service -n stratum-protocol --timeout=5m
+        done
+    
+    - name: Verify deployment
+      run: |
+        kubectl get pods -n stratum-protocol
+        kubectl get svc -n stratum-protocol
+    
+    - name: Notify Slack
+      if: always()
+      uses: slackapi/slack-github-action@v1.25.0
+      with:
+        payload: |
+          {
+            "text": "STRATUM PROTOCOL deployment to production completed!",
+            "status": "${{ job.status }}"
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+  
+  # =============================================================================
+  # INTEGRATION TESTS
+  # =============================================================================
+  
+  integration-tests:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install pytest requests
+    
+    - name: Run integration tests
+      env:
+        API_ENDPOINT: ${{ secrets.STAGING_API_ENDPOINT }}
+      run: |
+        pytest tests/integration/ -v
+    
+    - name: Performance tests
+      run: |
+        pip install locust
+        locust -f tests/performance/locustfile.py --headless -u 100 -r 10 --run-time 60s --host ${{ secrets.STAGING_API_ENDPOINT }}

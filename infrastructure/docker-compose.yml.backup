@@ -1,0 +1,321 @@
+version: '3.9'
+
+services:
+  # ======================================  redis:
+    image: redis:7-alpine
+    container_name: stratum-redis
+    command: redis-server --appendonly yes --requirepass dev_password
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - stratum-network=====================
+  # DATABASES
+  # ==========================================================================
+  
+  postgres:
+    image: postgres:16-alpine
+    container_name: stratum-postgres
+    environment:
+      POSTGRES_DB: stratum_protocol
+      POSTGRES_USER: stratum_admin
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts/postgres:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stratum_admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stratum-network
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: stratum-timescaledb
+    environment:
+      POSTGRES_DB: stratum_timeseries
+      POSTGRES_USER: timescale_admin
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U timescale_admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stratum-network
+
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: stratum-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/dev_password
+      NEO4J_PLUGINS: '["graph-data-science", "apoc"]'
+      NEO4J_dbms_memory_heap_max__size: 4G
+      NEO4J_dbms_memory_pagecache_size: 2G
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - stratum-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: stratum-redis
+    command: redis-server --requirepass dev_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stratum-network
+
+  mongodb:
+    image: mongo:7
+    container_name: stratum-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo_admin
+      MONGO_INITDB_ROOT_PASSWORD: dev_password
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stratum-network
+
+  # ==========================================================================
+  # MESSAGE BROKER
+  # ==========================================================================
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: stratum-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - stratum-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: stratum-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - stratum-network
+
+  # ==========================================================================
+  # OBSERVABILITY STACK
+  # ==========================================================================
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: stratum-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - stratum-network
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: stratum-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - stratum-network
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.51
+    container_name: stratum-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    networks:
+      - stratum-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: stratum-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - stratum-network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: stratum-kibana
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - stratum-network
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: stratum-logstash
+    volumes:
+      - ./config/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+    depends_on:
+      - elasticsearch
+    networks:
+      - stratum-network
+
+  # ==========================================================================
+  # ML INFRASTRUCTURE
+  # ==========================================================================
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.0
+    container_name: stratum-mlflow
+    command: mlflow server --host 0.0.0.0 --port 5001 --backend-store-uri postgresql://stratum_admin:${POSTGRES_PASSWORD:-dev_password}@postgres:5432/mlflow --default-artifact-root /mlflow/artifacts
+    ports:
+      - "5001:5001"
+    volumes:
+      - mlflow_data:/mlflow
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev_password}
+    depends_on:
+      - postgres
+    networks:
+      - stratum-network
+
+  ray-head:
+    image: rayproject/ray:2.9.0-py311
+    container_name: stratum-ray-head
+    command: ray start --head --dashboard-host 0.0.0.0 --port 6379 --dashboard-port 8265 --block
+    ports:
+      - "6379:6379"
+      - "8265:8265"
+      - "10001:10001"
+    shm_size: 4gb
+    networks:
+      - stratum-network
+
+  # ==========================================================================
+  # API GATEWAY
+  # ==========================================================================
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: stratum-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./config/nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - kafka
+      - redis
+    networks:
+      - stratum-network
+
+networks:
+  stratum-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  timescaledb_data:
+  neo4j_data:
+  neo4j_logs:
+  redis_data:
+  mongodb_data:
+  zookeeper_data:
+  zookeeper_logs:
+  kafka_data:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
+  mlflow_data:

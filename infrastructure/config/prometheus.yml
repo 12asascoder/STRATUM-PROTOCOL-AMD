@@ -1,0 +1,159 @@
+# Prometheus Configuration for STRATUM PROTOCOL
+# Scrapes metrics from all microservices and infrastructure components
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'stratum-protocol-dev'
+    environment: 'development'
+
+# Alertmanager configuration (optional)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - 'alertmanager:9093'
+
+# Load rules once and periodically evaluate them
+rule_files:
+  # - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Data Ingestion Service
+  - job_name: 'data-ingestion'
+    static_configs:
+      - targets: ['host.docker.internal:8001']
+        labels:
+          service: 'data-ingestion'
+          layer: 'ingestion'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Knowledge Graph Service
+  - job_name: 'knowledge-graph'
+    static_configs:
+      - targets: ['host.docker.internal:8002']
+        labels:
+          service: 'knowledge-graph'
+          layer: 'core'
+    metrics_path: '/metrics'
+
+  # Cascading Failure Simulation
+  - job_name: 'cascading-failure'
+    static_configs:
+      - targets: ['host.docker.internal:8003']
+        labels:
+          service: 'cascading-failure'
+          layer: 'simulation'
+    metrics_path: '/metrics'
+
+  # State Estimation Engine
+  - job_name: 'state-estimation'
+    static_configs:
+      - targets: ['host.docker.internal:8004']
+        labels:
+          service: 'state-estimation'
+          layer: 'core'
+    metrics_path: '/metrics'
+
+  # Citizen Behavior Simulation
+  - job_name: 'citizen-behavior'
+    static_configs:
+      - targets: ['host.docker.internal:8005']
+        labels:
+          service: 'citizen-behavior'
+          layer: 'simulation'
+    metrics_path: '/metrics'
+
+  # Policy Optimization
+  - job_name: 'policy-optimization'
+    static_configs:
+      - targets: ['host.docker.internal:8006']
+        labels:
+          service: 'policy-optimization'
+          layer: 'optimization'
+    metrics_path: '/metrics'
+
+  # Economic Intelligence
+  - job_name: 'economic-intelligence'
+    static_configs:
+      - targets: ['host.docker.internal:8007']
+        labels:
+          service: 'economic-intelligence'
+          layer: 'intelligence'
+    metrics_path: '/metrics'
+
+  # Decision Ledger
+  - job_name: 'decision-ledger'
+    static_configs:
+      - targets: ['host.docker.internal:8008']
+        labels:
+          service: 'decision-ledger'
+          layer: 'ledger'
+    metrics_path: '/metrics'
+
+  # PostgreSQL Exporter (if installed)
+  - job_name: 'postgresql'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: 'postgresql'
+          layer: 'database'
+
+  # Neo4j Metrics
+  - job_name: 'neo4j'
+    static_configs:
+      - targets: ['neo4j:2004']
+        labels:
+          service: 'neo4j'
+          layer: 'database'
+    metrics_path: '/metrics'
+
+  # Redis Exporter (if installed)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: 'redis'
+          layer: 'cache'
+
+  # MongoDB Exporter (if installed)
+  - job_name: 'mongodb'
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
+        labels:
+          service: 'mongodb'
+          layer: 'database'
+
+  # Kafka Exporter (if installed)
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+        labels:
+          service: 'kafka'
+          layer: 'messaging'
+
+  # Node Exporter for system metrics (if installed)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node-exporter'
+          layer: 'system'
+
+  # cAdvisor for container metrics (if installed)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          service: 'cadvisor'
+          layer: 'system'

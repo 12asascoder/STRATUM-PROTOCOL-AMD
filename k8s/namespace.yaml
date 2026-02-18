@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: stratum-protocol
+  labels:
+    name: stratum-protocol
+    environment: production

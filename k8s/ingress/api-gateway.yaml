@@ -1,0 +1,186 @@
+---
+# API Gateway / Ingress Controller
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: stratum-ingress
+  namespace: stratum-protocol
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+spec:
+  tls:
+  - hosts:
+    - stratum-protocol.example.com
+    - api.stratum-protocol.example.com
+    secretName: stratum-tls-cert
+  rules:
+  # Frontend
+  - host: stratum-protocol.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 3000
+  
+  # API Gateway
+  - host: api.stratum-protocol.example.com
+    http:
+      paths:
+      # Data Ingestion API
+      - path: /api/v1/ingest
+        pathType: Prefix
+        backend:
+          service:
+            name: data-ingestion
+            port:
+              number: 8001
+      
+      # Knowledge Graph API
+      - path: /api/v1/graph
+        pathType: Prefix
+        backend:
+          service:
+            name: knowledge-graph
+            port:
+              number: 8002
+      
+      # Cascade Simulation API
+      - path: /api/v1/simulate
+        pathType: Prefix
+        backend:
+          service:
+            name: cascading-failure
+            port:
+              number: 8003
+      
+      # State Estimation API
+      - path: /api/v1/estimate
+        pathType: Prefix
+        backend:
+          service:
+            name: state-estimation
+            port:
+              number: 8004
+      
+      # Citizen Behavior API
+      - path: /api/v1/behavior
+        pathType: Prefix
+        backend:
+          service:
+            name: citizen-behavior
+            port:
+              number: 8005
+      
+      # Policy Optimization API
+      - path: /api/v1/policy
+        pathType: Prefix
+        backend:
+          service:
+            name: policy-optimization
+            port:
+              number: 8006
+      
+      # Economic Intelligence API
+      - path: /api/v1/economic
+        pathType: Prefix
+        backend:
+          service:
+            name: economic-intelligence
+            port:
+              number: 8007
+      
+      # Decision Ledger API
+      - path: /api/v1/ledger
+        pathType: Prefix
+        backend:
+          service:
+            name: decision-ledger
+            port:
+              number: 8008
+      
+      # Metrics endpoint
+      - path: /metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: prometheus
+            port:
+              number: 9090
+---
+# Network Policy - Allow ingress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress
+  namespace: stratum-protocol
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8000
+---
+# Network Policy - Allow inter-service communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-inter-service
+  namespace: stratum-protocol
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector: {}
+  egress:
+  - to:
+    - podSelector: {}
+---
+# Network Policy - Allow database access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-database-access
+  namespace: stratum-protocol
+spec:
+  podSelector:
+    matchLabels:
+      tier: database
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          tier: application
+    ports:
+    - protocol: TCP
+      port: 5432  # PostgreSQL
+    - protocol: TCP
+      port: 7687  # Neo4j Bolt
+    - protocol: TCP
+      port: 27017 # MongoDB
+    - protocol: TCP
+      port: 6379  # Redis
+    - protocol: TCP
+      port: 9092  # Kafka
