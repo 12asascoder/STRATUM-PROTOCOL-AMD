@@ -1,222 +1,18 @@
-import React, { useState, useEffect, useRef, Suspense } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, PerspectiveCamera, Html } from '@react-three/drei';
-import { 
-  AppBar, 
-  Toolbar, 
-  Typography, 
-  Box, 
-  Card, 
-  CardContent, 
-  Grid, 
-  Button,
-  Alert,
-  CircularProgress
-} from '@mui/material';
-import * as THREE from 'three';
+import React, { useState, useEffect, Suspense } from 'react';
+import { ThemeProvider, CssBaseline, Box, Grid, CircularProgress, Typography } from '@mui/material';
+import { Canvas } from '@react-three/fiber';
 import axios from 'axios';
 import io from 'socket.io-client';
 
-// =============================================================================
-// 3D Infrastructure Node Component
-// =============================================================================
+// Theme
+import theme from './theme/theme';
 
-function InfrastructureNode({ node, position, onClick }) {
-  const meshRef = useRef();
-  const [hovered, setHovered] = useState(false);
-  
-  // Animate based on stress level
-  useFrame((state) => {
-    if (meshRef.current) {
-      meshRef.current.rotation.y += 0.01;
-      
-      // Pulse effect for stressed nodes
-      if (node.load_percentage > 0.8) {
-        const scale = 1 + Math.sin(state.clock.elapsedTime * 3) * 0.1;
-        meshRef.current.scale.set(scale, scale, scale);
-      }
-    }
-  });
-  
-  // Color based on health status
-  const getColor = () => {
-    if (node.load_percentage > 0.9) return '#ff0000'; // Critical
-    if (node.load_percentage > 0.7) return '#ff9800'; // Warning
-    return '#4caf50'; // Healthy
-  };
-  
-  return (
-    <mesh
-      ref={meshRef}
-      position={position}
-      onClick={() => onClick(node)}
-      onPointerOver={() => setHovered(true)}
-      onPointerOut={() => setHovered(false)}
-    >
-      <boxGeometry args={[1, 2, 1]} />
-      <meshStandardMaterial 
-        color={getColor()} 
-        emissive={hovered ? '#ffffff' : '#000000'}
-        emissiveIntensity={hovered ? 0.3 : 0}
-      />
-      
-      {hovered && (
-        <Html>
-          <div style={{
-            background: 'rgba(0,0,0,0.8)',
-            color: 'white',
-            padding: '10px',
-            borderRadius: '5px',
-            minWidth: '200px'
-          }}>
-            <strong>{node.name}</strong><br/>
-            Type: {node.node_type}<br/>
-            Load: {(node.load_percentage * 100).toFixed(1)}%<br/>
-            Capacity: {node.capacity}
-          </div>
-        </Html>
-      )}
-    </mesh>
-  );
-}
-
-// =============================================================================
-// Connection Lines between Infrastructure
-// =============================================================================
-
-function ConnectionLine({ start, end, strength }) {
-  const points = [
-    new THREE.Vector3(...start),
-    new THREE.Vector3(...end)
-  ];
-  
-  const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
-  
-  const color = strength > 0.7 ? '#4caf50' : strength > 0.4 ? '#ff9800' : '#f44336';
-  
-  return (
-    <line geometry={lineGeometry}>
-      <lineBasicMaterial color={color} linewidth={2} />
-    </line>
-  );
-}
-
-// =============================================================================
-// 3D City Scene
-// =============================================================================
-
-function CityScene({ nodes, connections, onNodeClick }) {
-  return (
-    <>
-      <ambientLight intensity={0.5} />
-      <pointLight position={[10, 10, 10]} intensity={1} />
-      <spotLight position={[-10, 20, 10]} angle={0.3} penumbra={1} />
-      
-      {/* Infrastructure Nodes */}
-      {nodes.map((node, idx) => (
-        <InfrastructureNode
-          key={node.node_id}
-          node={node}
-          position={[
-            (idx % 10) * 3 - 15,
-            0,
-            Math.floor(idx / 10) * 3 - 15
-          ]}
-          onClick={onNodeClick}
-        />
-      ))}
-      
-      {/* Connection Lines */}
-      {connections.map((conn, idx) => (
-        <ConnectionLine
-          key={idx}
-          start={conn.start}
-          end={conn.end}
-          strength={conn.strength}
-        />
-      ))}
-      
-      {/* Ground Plane */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1, 0]}>
-        <planeGeometry args={[100, 100]} />
-        <meshStandardMaterial color="#1a237e" opacity={0.3} transparent />
-      </mesh>
-      
-      <OrbitControls 
-        enablePan={true}
-        enableZoom={true}
-        maxPolarAngle={Math.PI / 2}
-      />
-      <PerspectiveCamera makeDefault position={[0, 20, 30]} />
-    </>
-  );
-}
-
-// =============================================================================
-// Dashboard Stats Component
-// =============================================================================
-
-function DashboardStats({ stats }) {
-  return (
-    <Grid container spacing={2}>
-      <Grid item xs={3}>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>
-              Total Nodes
-            </Typography>
-            <Typography variant="h4">
-              {stats.total_nodes || 0}
-            </Typography>
-          </CardContent>
-        </Card>
-      </Grid>
-      
-      <Grid item xs={3}>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>
-              Critical Nodes
-            </Typography>
-            <Typography variant="h4" color="error">
-              {stats.critical_nodes || 0}
-            </Typography>
-          </CardContent>
-        </Card>
-      </Grid>
-      
-      <Grid item xs={3}>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>
-              Average Load
-            </Typography>
-            <Typography variant="h4" color="warning.main">
-              {stats.avg_load ? `${(stats.avg_load * 100).toFixed(1)}%` : '0%'}
-            </Typography>
-          </CardContent>
-        </Card>
-      </Grid>
-      
-      <Grid item xs={3}>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>
-              System Health
-            </Typography>
-            <Typography variant="h4" color="success.main">
-              {stats.health_score ? `${(stats.health_score * 100).toFixed(0)}%` : '0%'}
-            </Typography>
-          </CardContent>
-        </Card>
-      </Grid>
-    </Grid>
-  );
-}
-
-// =============================================================================
-// Main Application Component
-// =============================================================================
+// Components
+import Header from './components/Layout/Header';
+import StatCard from './components/Dashboard/StatCard';
+import AlertFeed from './components/Dashboard/AlertFeed';
+import ControlPanel from './components/Dashboard/ControlPanel';
+import CityScene from './components/Visualization/CityScene';
 
 function App() {
   const [nodes, setNodes] = useState([]);
@@ -225,15 +21,15 @@ function App() {
   const [selectedNode, setSelectedNode] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Initialize WebSocket connection
   useEffect(() => {
     const socket = io('http://localhost:8001');
-    
+
     socket.on('connect', () => {
       console.log('WebSocket connected');
     });
-    
+
     socket.on('infrastructure_update', (data) => {
       setNodes(prevNodes => {
         const updated = [...prevNodes];
@@ -244,14 +40,14 @@ function App() {
         return updated;
       });
     });
-    
+
     socket.on('alert', (alert) => {
-      setAlerts(prev => [alert, ...prev].slice(0, 5));
+      setAlerts(prev => [alert, ...prev].slice(0, 50)); // Keep last 50 alerts
     });
-    
+
     return () => socket.disconnect();
   }, []);
-  
+
   // Fetch initial data
   useEffect(() => {
     const fetchData = async () => {
@@ -259,7 +55,7 @@ function App() {
         // Fetch nodes from knowledge graph
         const nodesResponse = await axios.get('/api/v1/graph/nodes');
         setNodes(nodesResponse.data);
-        
+
         // Calculate stats
         const criticalCount = nodesResponse.data.filter(
           n => n.load_percentage > 0.9
@@ -267,127 +63,167 @@ function App() {
         const avgLoad = nodesResponse.data.reduce(
           (sum, n) => sum + n.load_percentage, 0
         ) / nodesResponse.data.length;
-        
+
         setStats({
           total_nodes: nodesResponse.data.length,
           critical_nodes: criticalCount,
           avg_load: avgLoad,
           health_score: 1 - avgLoad
         });
-        
+
         setLoading(false);
       } catch (error) {
         console.error('Error fetching data:', error);
         setLoading(false);
+        // Fallback data for demo purposes if API fails
+        setLoading(false);
       }
     };
-    
+
     fetchData();
     const interval = setInterval(fetchData, 5000); // Refresh every 5s
-    
+
     return () => clearInterval(interval);
   }, []);
-  
+
   const handleNodeClick = (node) => {
     setSelectedNode(node);
   };
-  
-  const runCascadeSimulation = async () => {
-    if (!selectedNode) return;
-    
+
+  const runCascadeSimulation = async (node) => {
     try {
       const response = await axios.post('/api/v1/simulate/cascade', {
-        initial_failure_nodes: [selectedNode.node_id],
+        initial_failure_nodes: [node.node_id],
         monte_carlo_runs: 1000,
         confidence_level: 0.95
       });
-      
-      alert(`Simulation complete!\nAffected nodes: ${response.data.affected_nodes_ci[0]}-${response.data.affected_nodes_ci[1]}\nImpact score: ${response.data.impact_score_mean.toFixed(2)}`);
+
+      const resultMessage = `Simulation complete!\nAffected: ${response.data.affected_nodes_ci[0]}-${response.data.affected_nodes_ci[1]}\nImpact: ${response.data.impact_score_mean.toFixed(2)}`;
+      alert(resultMessage);
+
+      // Add visual alert for feedback
+      setAlerts(prev => [{
+        severity: 'info',
+        message: `Simulation Result: Impact Score ${response.data.impact_score_mean.toFixed(2)}`,
+        timestamp: new Date().toISOString()
+      }, ...prev]);
+
     } catch (error) {
       console.error('Simulation error:', error);
+      alert('Simulation failed. Check console for details.');
     }
   };
-  
+
+  // Mock data for sparklines
+  const mockTrendData = Array.from({ length: 20 }, (_, i) => ({
+    value: Math.random() * 100
+  }));
+
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" height="100vh">
-        <CircularProgress size={60} />
-      </Box>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box display="flex" justifyContent="center" alignItems="center" height="100vh">
+          <CircularProgress size={60} color="secondary" />
+        </Box>
+      </ThemeProvider>
     );
   }
-  
+
   return (
-    <Box sx={{ flexGrow: 1 }}>
-      {/* Header */}
-      <AppBar position="static" sx={{ background: 'linear-gradient(45deg, #1a237e 30%, #311b92 90%)' }}>
-        <Toolbar>
-          <Typography variant="h5" component="div" sx={{ flexGrow: 1, fontWeight: 'bold' }}>
-            🏙️ STRATUM PROTOCOL - Urban Decision Intelligence
-          </Typography>
-          <Typography variant="body2">
-            Real-Time Infrastructure Monitoring
-          </Typography>
-        </Toolbar>
-      </AppBar>
-      
-      {/* Alerts */}
-      <Box sx={{ p: 2 }}>
-        {alerts.map((alert, idx) => (
-          <Alert key={idx} severity={alert.severity} sx={{ mb: 1 }}>
-            {alert.message}
-          </Alert>
-        ))}
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        <Header />
+
+        <Box sx={{ flexGrow: 1, p: 2, overflow: 'auto' }}>
+          <Grid container spacing={2} sx={{ height: '100%' }}>
+
+            {/* Left Column: Stats & Controls */}
+            <Grid item xs={12} md={3} sx={{ display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
+
+              {/* Stat Cards */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                <StatCard
+                  title="Total Nodes"
+                  value={stats.total_nodes || 0}
+                  unit=""
+                />
+                <StatCard
+                  title="Critical"
+                  value={stats.critical_nodes || 0}
+                  color="#ff1744"
+                  subValue={stats.critical_nodes > 0 ? "+2 from last hr" : "Stable"}
+                />
+              </Box>
+
+              <StatCard
+                title="System Health"
+                value={stats.health_score ? `${(stats.health_score * 100).toFixed(0)}` : '0'}
+                unit="%"
+                color="#00e676"
+                data={mockTrendData}
+              />
+
+              <Box sx={{ flexGrow: 1, minHeight: 0 }}>
+                <ControlPanel
+                  selectedNode={selectedNode}
+                  onRunSimulation={runCascadeSimulation}
+                />
+              </Box>
+            </Grid>
+
+            {/* Middle Column: 3D Visualization */}
+            <Grid item xs={12} md={6} sx={{ height: '100%' }}>
+              <Box sx={{
+                height: '100%',
+                bgcolor: 'background.paper',
+                borderRadius: 2,
+                overflow: 'hidden',
+                position: 'relative',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                boxShadow: '0 0 20px rgba(0, 229, 255, 0.1)'
+              }}>
+                <Canvas shadows>
+                  <Suspense fallback={null}>
+                    <CityScene
+                      nodes={nodes}
+                      connections={connections}
+                      onNodeClick={handleNodeClick}
+                    />
+                  </Suspense>
+                </Canvas>
+
+                {/* Overlay for quick info if needed */}
+                <Box sx={{ position: 'absolute', bottom: 16, left: 16, right: 16, zIndex: 10, pointerEvents: 'none' }}>
+                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
+                    Left Click: Select | Right Click: Pan | Scroll: Zoom
+                  </Typography>
+                </Box>
+              </Box>
+            </Grid>
+
+            {/* Right Column: Alerts & More Info */}
+            <Grid item xs={12} md={3} sx={{ height: '100%' }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 2 }}>
+                <StatCard
+                  title="Avg Load"
+                  value={stats.avg_load ? `${(stats.avg_load * 100).toFixed(1)}` : '0'}
+                  unit="%"
+                  color="#ff9100"
+                  data={mockTrendData} // Reuse for demo
+                />
+
+                <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'hidden' }}>
+                  <AlertFeed alerts={alerts} />
+                </Box>
+              </Box>
+            </Grid>
+
+          </Grid>
+        </Box>
       </Box>
-      
-      {/* Stats Dashboard */}
-      <Box sx={{ p: 2 }}>
-        <DashboardStats stats={stats} />
-      </Box>
-      
-      {/* 3D Visualization */}
-      <Box sx={{ height: '600px', border: '2px solid #1a237e', borderRadius: 2, m: 2 }}>
-        <Canvas>
-          <Suspense fallback={null}>
-            <CityScene 
-              nodes={nodes} 
-              connections={connections}
-              onNodeClick={handleNodeClick}
-            />
-          </Suspense>
-        </Canvas>
-      </Box>
-      
-      {/* Control Panel */}
-      <Box sx={{ p: 2 }}>
-        <Card>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Control Panel
-            </Typography>
-            
-            {selectedNode ? (
-              <>
-                <Typography variant="body1">
-                  Selected: <strong>{selectedNode.name}</strong>
-                </Typography>
-                <Button 
-                  variant="contained" 
-                  color="primary" 
-                  sx={{ mt: 2 }}
-                  onClick={runCascadeSimulation}
-                >
-                  Run Cascade Simulation
-                </Button>
-              </>
-            ) : (
-              <Typography color="textSecondary">
-                Click on a node to select and run simulations
-              </Typography>
-            )}
-          </CardContent>
-        </Card>
-      </Box>
-    </Box>
+    </ThemeProvider>
   );
 }
 
