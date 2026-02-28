@@ -169,9 +169,18 @@ services:
     image: grafana/grafana:10.2.0
     container_name: stratum-grafana
     environment:
+      # Admin credentials
+      GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_ROOT_URL: http://localhost:3001
+      # Enable anonymous access for local dev (no login required)
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      # Disable live streaming WebSocket (prevents ws:// 401 errors)
+      GF_LIVE_MAX_CONNECTIONS: "0"
+      # Serve Grafana sub-path and WebSocket settings
+      GF_SERVER_SERVE_FROM_SUB_PATH: "false"
     ports:
       - "3001:3000"
     volumes:

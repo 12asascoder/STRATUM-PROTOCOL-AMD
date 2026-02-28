@@ -107,3 +107,7 @@ temp/
 Thumbs.db
 .Spotlight-V100
 .Trashes
+
+# Start script runtime
+.logs/
+.pids/

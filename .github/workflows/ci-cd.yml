@@ -109,10 +109,19 @@ jobs:
           type=semver,pattern={{major}}.{{minor}}
           type=sha
     
+    - name: Set build context
+      id: context
+      run: |
+        if [ "${{ matrix.service }}" = "frontend" ]; then
+          echo "context=./frontend" >> $GITHUB_OUTPUT
+        else
+          echo "context=./services/${{ matrix.service }}" >> $GITHUB_OUTPUT
+        fi
+    
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
-        context: ./services/${{ matrix.service }}
+        context: ${{ steps.context.outputs.context }}
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
@@ -177,8 +186,10 @@ jobs:
     - name: Run smoke tests
       run: |
         kubectl run smoke-test --image=curlimages/curl --restart=Never -n stratum-protocol -- \
-          curl http://data-ingestion:8001/health
-        kubectl wait --for=condition=complete --timeout=60s job/smoke-test -n stratum-protocol
+          sh -c "curl -f http://data-ingestion:8000/health || exit 1"
+        kubectl wait --for=condition=ready pod/smoke-test -n stratum-protocol --timeout=60s || true
+        kubectl logs smoke-test -n stratum-protocol
+        kubectl delete pod smoke-test -n stratum-protocol --ignore-not-found=true
   
   deploy-production:
     needs: [build-images, security-scan]

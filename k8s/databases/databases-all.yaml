@@ -26,16 +26,13 @@ spec:
           name: bolt
         env:
         - name: NEO4J_AUTH
-          valueFrom:
-            secretKeyRef:
-              name: stratum-secrets
-              key: NEO4J_AUTH
+          value: "neo4j/changeme_strong_password_here"
         - name: NEO4J_ACCEPT_LICENSE_AGREEMENT
           value: "yes"
         - name: NEO4J_server_memory_heap_initial__size
-          value: "2G"
+          value: "512M"
         - name: NEO4J_server_memory_heap_max__size
-          value: "4G"
+          value: "1G"
         volumeMounts:
         - name: neo4j-data
           mountPath: /data
@@ -43,11 +40,11 @@ spec:
           mountPath: /logs
         resources:
           requests:
-            memory: "4Gi"
-            cpu: "2"
+            memory: "512Mi"
+            cpu: "500m"
           limits:
-            memory: "8Gi"
-            cpu: "4"
+            memory: "1Gi"
+            cpu: "1"
         livenessProbe:
           httpGet:
             path: /
@@ -172,7 +169,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: stratum-secrets
-              key: MONGO_PASSWORD
+              key: MONGODB_PASSWORD
         volumeMounts:
         - name: mongodb-data
           mountPath: /data/db
@@ -214,7 +211,7 @@ metadata:
   namespace: stratum-protocol
 spec:
   serviceName: kafka
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: kafka
@@ -244,11 +241,11 @@ spec:
           mountPath: /var/lib/kafka/data
         resources:
           requests:
-            memory: "2Gi"
-            cpu: "1"
+            memory: "512Mi"
+            cpu: "250m"
           limits:
-            memory: "4Gi"
-            cpu: "2"
+            memory: "1Gi"
+            cpu: "500m"
   volumeClaimTemplates:
   - metadata:
       name: kafka-data
@@ -280,7 +277,7 @@ metadata:
   namespace: stratum-protocol
 spec:
   serviceName: zookeeper
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: zookeeper
